@@ -1,0 +1,12 @@
+Flask==3.0.0
+gunicorn==21.2.0
+xgboost==2.0.3
+pulp==2.7.0
+numpy==1.26
+pandas==2.2.1
+scipy==1.11.4
+matplotlib==3.8.3
+seaborn==0.13.2
+scikit-learn==1.4.1.post1
+werkzeug==3.0.1
+requests==2.31.0

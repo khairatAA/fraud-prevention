@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Powered Fraud Prevention System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+        #what-we-do {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="what-we-do">
+            What are we doing today?
+        </div>
+        <img src="{{ url_for('static', filename='mtn-logo.jpg') }}" alt="MTN Logo" width="150">
+        <h2>AI-Powered Fraud Prevention System</h2>
+
+        <input type="file" id="csvFile">
+        <button onclick="uploadCSV()">Upload & Process</button>
+        
+        <div id="download"></div>
+
+        <div id="predictions-section" style="display: none;">
+            <h3>Predicted Fraud Cases (Preview)</h3>
+            <table id="predictions-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Transaction ID</th>
+                        <th>Msisdn</th>
+                        <th>Fraud Prediction</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function uploadCSV() {
+            const fileInput = document.getElementById("csvFile");
+            if (!fileInput.files.length) {
+                alert("Please select a CSV file.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            try {
+                const response = await fetch("/upload_csv", { method: "POST", body: formData });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    document.getElementById("download").innerHTML = `<a href="${url}" download="Predicted_Cells.csv">Download Results</a>`;
+                    
+                    fetchPredictions();
+                } else {
+                    alert("Error processing file.");
+                }
+            } catch (error) {
+                console.error("Upload failed:", error);
+                alert("An error occurred. Please try again.");
+            }
+        }
+
+        async function fetchPredictions() {
+            try {
+                const response = await fetch("/get_predictions");
+                const data = await response.json();
+
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+
+                const tableBody = document.querySelector("#predictions-table tbody");
+                tableBody.innerHTML = data.predictions.map(p =>
+                    `<tr>
+                        <td>${p.timestamp}</td>
+                        <td>${p.transaction_id}</td>
+                        <td>${p.calling_msisdn}</td>
+                        <td>${p.prediction}</td>
+                    </tr>`
+                ).join("");
+
+                document.getElementById("predictions-section").style.display = "block";
+            } catch (error) {
+                console.error("Failed to fetch predictions:", error);
+                alert("Error fetching predictions.");
+            }
+        }
+    </script>
+</body>
+</html>
