@@ -1,38 +1,41 @@
 from flask import Flask, request, jsonify, render_template, send_file
 import pandas as pd
 import numpy as np
-# from google.cloud import storage
-from datetime import timedelta
+from google.cloud import storage
 import io
+import os
+import pickle
 
 app = Flask(__name__, template_folder="templates")
 
-# Google Cloud Storage settings
-# BUCKET_NAME = "innovators1"
-FILE_NAME = "testtt.csv"
+BUCKET_NAME = "innovators1"
+MODEL_FILE_NAME = "trained_model.pkl"
 
-# Function to read CSV from GCS
-def read_file(file_name):
-    # client = storage.Client()
-    # bucket = client.bucket(bucket_name)
-    # blob = bucket.blob(file_name)
-    # content = blob.download_as_text()
-    df = pd.read_csv("testtt.csv")
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    return df
+model = None
+feature_names = None 
 
-# Read and preprocess data
-df = read_file(FILE_NAME)
+try:
+    client = storage.Client()
+    bucket = client.bucket(BUCKET_NAME)
+    blob = bucket.blob(MODEL_FILE_NAME)
+    byte_stream = io.BytesIO()
+    blob.download_to_file(byte_stream)
+    byte_stream.seek(0)
+    model = pickle.load(byte_stream)
+    print(f"Model loaded successfully from gs://{BUCKET_NAME}/{MODEL_FILE_NAME}")
 
-df.dropna(inplace=True)
+    if hasattr(model, 'feature_names_in_'):
+        feature_names = model.feature_names_in_.tolist()
+        print(f"Feature names retrieved from model: {feature_names}")
+    elif hasattr(model, 'feature_name'): 
+        feature_names = model.feature_name
+        print(f"Feature names retrieved from model: {feature_names}")
+    else:
+        print("Could not automatically determine feature names from the model.")
+        feature_names = None 
 
-df.drop(columns=["timestamp_3", "timestamp_4"], axis=1, inplace=True, errors="ignore")
-
-# Final predicted DataFrame
-
-# df = df.rename(columns={"model_prediction": "prediction"})
-predicted_df = df[["timestamp", "transaction_id", "calling_msisdn", "prediction"]]
-
+except Exception as e:
+    print(f"Error loading model from GCS: {e}")
 
 @app.route('/')
 def home():
@@ -46,49 +49,42 @@ def upload_csv():
 
         if "transaction_id" not in input_df.columns:
             return jsonify({"error": "CSV must contain a 'transaction_id' column"})
-        
-        # input_df = input_df.rename(columns={"model_prediction": "prediction"})
 
-        input_df["timestamp"] = pd.to_datetime(input_df["timestamp"])
-
+        input_df["timestamp"] = pd.to_datetime(input_df["timestamp"], errors='coerce')
         input_df["transaction_id"] = input_df["transaction_id"].astype(str).str.lower()
-        predicted_df["transaction_id"] = predicted_df["transaction_id"].astype(str).str.lower()
 
-        merged_df = input_df.merge(predicted_df, on=["transaction_id"], how="left").drop_duplicates(subset=["transaction_id"])
+        try:
+            if model is not None and feature_names is not None:
+    
+                if all(feature in input_df.columns for feature in feature_names):
+                    features = input_df[feature_names].copy()
+                    predictions = model.predict(features)
+                    input_df['prediction'] = predictions
+                else:
+                    missing_features = [f for f in feature_names if f not in input_df.columns]
+                    return jsonify({"error": f"Missing required column(s) for prediction: {missing_features}"})
+            elif model is not None and feature_names is None:
+                input_df['prediction'] = 'Feature names could not be determined from the model.'
+            else:
+                input_df['prediction'] = 'Model not loaded'
 
-        # Convert DataFrame to CSV for download
+        except KeyError as e:
+            return jsonify({"error": f"Missing column(s) in the uploaded CSV: {e}"})
+        except Exception as e:
+            return jsonify({"error": f"Error during feature engineering or prediction: {e}"})
+
         output = io.BytesIO()
-        merged_df.to_csv(output, index=False)
+        input_df.to_csv(output, index=False)
         output.seek(0)
 
-        # Store the CSV file in GCS
-        # client = storage.Client()
-        # bucket = client.bucket(BUCKET_NAME)
-        # blob = bucket.blob("Predicted_Cells.csv")  # Storing in "innovators1" bucket
-        # blob.upload_from_file(output, content_type="text/csv")
-        # output.seek(0)  # Reset buffer position for file download
-
-        return send_file(output, mimetype='text/csv', as_attachment=True, download_name="Predicted_Cells.csv")
+        return send_file(output, mimetype='text/csv', as_attachment=True, download_name="Predicted_Data.csv")
 
     except Exception as e:
         return jsonify({"error": str(e)})
-    
 
 @app.route('/get_predictions', methods=['GET'])
 def get_predictions():
-    """Returns the first 10 predictions for display."""
-    try:
-        predictions = predicted_df.sort_values(by="timestamp", ascending=False)
-        predictions = predictions[predictions["prediction"]==1].head(4)
-        predictions["prediction"] = predictions["prediction"].replace(1, "Fraudulent")
-
-        if predictions.empty:
-            return jsonify({"error": "No predictions available"})
-
-        return jsonify({"predictions": predictions.to_dict(orient="records")})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    return jsonify({"message": "This route can be adapted to show recent predictions."})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)
